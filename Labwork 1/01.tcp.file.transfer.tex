@@ -1,0 +1,168 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{float}
+\usepackage{hyperref}
+
+
+\geometry{margin=1in}
+
+
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstset{
+    language=C,
+    backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=2
+}
+
+
+\title{\textbf{Distributed Systems}\\Practical Work 1: TCP File Transfer}
+\author{
+    \textbf \\    Student name: Nguyen Minh Cuong - 23BI14467 \\
+}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+The objective of this lab work is to implement a file transfer system using the TCP/IP protocol over the CLI (Command Line Interface). The system consists of a Server that listens for connections and a Client that initiates the transfer. We implemented the solution using the \textbf{C language} and standard POSIX Sockets on \textbf{Kali Linux}.
+
+\section{Protocol Design}
+Since TCP is a stream-oriented protocol, the receiver does not know where a file ends. Therefore, we designed a simple application-layer protocol to ensure data integrity.
+
+\subsection{The Protocol Steps}
+\begin{enumerate}
+    \item \textbf{Handshake (Metadata):} The Client sends a formatted string containing the filename and file size.
+    \begin{itemize}
+        \item Format: \texttt{filename|filesize} (e.g., \texttt{mytest.txt|1024})
+    \end{itemize}
+    \item \textbf{Acknowledgment:} The Server parses the metadata, opens a file for writing, and sends back an \texttt{"OK"} signal.
+    \item \textbf{Data Transmission:} The Client reads the file in chunks (Buffer size: 1024 bytes) and sends raw binary data.
+    \item \textbf{Termination:} The Server counts the received bytes. When \texttt{total\_received == filesize}, it closes the connection.
+\end{enumerate}
+
+\subsection{Interaction Diagram}
+\begin{figure}[H]
+\centering
+\begin{verbatim}
+    CLIENT                                      SERVER
+      |                                            |
+      | --- 1. Metadata: "file.txt|500" ---------> |
+      |                                            |
+      | <----------- 2. Signal: "OK" ------------- |
+      |                                            |
+      | --- 3. Data Chunk (1024 bytes) ----------> |
+      | --- 3. Data Chunk (remaining) -----------> |
+      |                                            |
+      |           (Server counts bytes)            |
+      | <----------- 4. Close connection --------- |
+\end{verbatim}
+\caption{File Transfer Protocol Design}
+\end{figure}
+
+\section{System Organization}
+The architecture follows the standard TCP State Diagram.
+
+\begin{itemize}
+    \item \textbf{Server:} 
+    \begin{enumerate}
+        \item \texttt{socket()}: Create endpoint.
+        \item \texttt{setsockopt()}: Enable \texttt{SO\_REUSEADDR} to prevent "Address already in use" errors.
+        \item \texttt{bind()}: Attach to port 8080.
+        \item \texttt{listen()}: Wait for client.
+        \item \texttt{accept()}: Handshake and create a new file descriptor for the session.
+    \end{enumerate}
+    
+    \item \textbf{Client:}
+    \begin{enumerate}
+        \item \texttt{socket()}: Create endpoint.
+        \item \texttt{connect()}: Connect to Server IP (127.0.0.1) on port 8080.
+        \item \texttt{send()/recv()}: Transfer data.
+    \end{enumerate}
+\end{itemize}
+
+\section{Implementation Details}
+
+\subsection{Server-side (Handling Data)}
+The server extracts the file size and loops until all bytes are received.
+
+\begin{lstlisting}[caption=Server Code Snippet]
+// Parse metadata
+sscanf(buffer, "%[^|]|%ld", filename, &filesize);
+send(sockfd, "OK", 2, 0); // Ack
+
+// Receive loop
+while (total_received < filesize) {
+    bzero(buffer, BUFFER_SIZE);
+    int n = recv(sockfd, buffer, BUFFER_SIZE, 0);
+    if (n <= 0) break;
+    
+    fwrite(buffer, 1, n, fp);
+    total_received += n;
+}
+\end{lstlisting}
+
+\subsection{Client-side (Sending Data)}
+The client waits for the "OK" signal before sending the actual file content.
+
+\begin{lstlisting}[caption=Client Code Snippet]
+// Send metadata
+sprintf(buffer, "%s|%ld", filename, filesize);
+send(sock, buffer, sizeof(buffer), 0);
+
+// Wait for Server ACK
+recv(sock, buffer, BUFFER_SIZE, 0); 
+
+// Send file content
+while(1) {
+    int bytes_read = fread(buffer, 1, BUFFER_SIZE, fp);
+    if (bytes_read <= 0) break;
+    send(sock, buffer, bytes_read, 0);
+}
+\end{lstlisting}
+
+\section{Results}
+I successfully tested the system on Kali Linux. The client transferred \texttt{mytest.txt} and the server received it as \texttt{recv\_mytest.txt} with identical content.
+
+
+ \begin{figure}[H]
+     \centering
+     \includegraphics[width=0.9\textwidth]{result.png}
+     \caption{Successful file transfer on Kali Linux Terminal}
+ \end{figure}
+
+\section{Conclusion}
+Through this practical work, we have successfully implemented a basic File Transfer system using the Client-Server model and TCP/IP sockets in C.
+
+\begin{itemize}
+    \item \textbf{Protocol Design:} We designed a simple application-layer protocol that sends metadata (filename and size) before the actual data, ensuring the server knows exactly how much data to read.
+    \item \textbf{Socket Implementation:} We mastered the usage of POSIX socket primitives including \texttt{socket}, \texttt{bind}, \texttt{listen}, \texttt{accept}, and \texttt{connect}.
+    \item \textbf{Error Handling:} We successfully handled common network errors, specifically the "Address already in use" error on the server side by implementing the \texttt{SO\_REUSEADDR} socket option.
+\end{itemize}
+
+
+
+\end{document}
